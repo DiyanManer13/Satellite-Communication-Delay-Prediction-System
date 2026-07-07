@@ -491,3 +491,16 @@ hr {
 </style>
 """, unsafe_allow_html=True)
 
+@st.cache_resource(show_spinner=False)
+def load_model_cached():
+    if not MODEL_PKL.exists():
+        return None, None, None
+    with open(MODEL_PKL, "rb") as f:
+        p = pickle.load(f)
+    return p["model"], p["feature_cols"], p.get("metrics", {})
+
+@st.cache_data(show_spinner=False)
+def load_dataset_cached():
+    if not DATASET_CSV.exists():
+        return None
+    return pd.read_csv(DATASET_CSV)
