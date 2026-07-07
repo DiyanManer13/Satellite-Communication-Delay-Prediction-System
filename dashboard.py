@@ -609,3 +609,6 @@ def apply_white_theme(fig, height=320):
         ),
     )
     return fig
+
+model, feature_cols, train_metrics = load_model_cached()
+df = load_dataset_cached()
