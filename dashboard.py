@@ -504,3 +504,108 @@ def load_dataset_cached():
     if not DATASET_CSV.exists():
         return None
     return pd.read_csv(DATASET_CSV)
+
+def orbit_enc(alt):
+    return 0 if alt <= 2000 else (1 if alt <= 35786 else 2)
+
+def orbit_label(enc):
+    return {0: "LEO", 1: "MEO", 2: "GEO"}.get(enc, "—")
+
+def compute_distance(alt_km, az, el):
+    from physics_engine import satellite_cartesian, ground_station_cartesian, euclidean_distance
+    return euclidean_distance(
+        satellite_cartesian(alt_km, az, el),
+        ground_station_cartesian(0.0, 0.0)
+    )
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_conditions_from_api(lat, lon):
+    """Fetch real-time weather and deduce local time congestion via Open-Meteo API."""
+    weather_factor = 0.2
+    congestion_factor = 0.3
+    
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+        response = requests.get(url, timeout=3)
+        if response.status_code == 200:
+            data = response.json()
+            if "current_weather" in data:
+                cw = data["current_weather"]
+                w_code = cw.get("weathercode", 0)
+                
+                if w_code == 0: weather_factor = 0.1
+                elif w_code in [1, 2, 3]: weather_factor = 0.25
+                elif w_code in [45, 48]: weather_factor = 0.4
+                elif w_code in [51, 53, 55, 56, 57]: weather_factor = 0.5
+                elif w_code in [61, 63, 65, 66, 67]: weather_factor = 0.65
+                elif w_code in [71, 73, 75, 77]: weather_factor = 0.7
+                elif w_code in [80, 81, 82, 85, 86]: weather_factor = 0.75
+                elif w_code in [95, 96, 99]: weather_factor = 0.95
+                else: weather_factor = 0.3
+                
+                time_str = cw.get("time")
+                if time_str:
+                    dt = datetime.fromisoformat(time_str)
+                    offset = int(lon / 15.0)
+                    hour = (dt.hour + offset) % 24
+                    
+                    if 0 <= hour < 6: congestion_factor = 0.15
+                    elif 6 <= hour < 9: congestion_factor = 0.45
+                    elif 9 <= hour < 12: congestion_factor = 0.75
+                    elif 12 <= hour < 18: congestion_factor = 0.50
+                    elif 18 <= hour < 22: congestion_factor = 0.85
+                    else: congestion_factor = 0.30
+    except Exception:
+        pass
+        
+    return min(0.95, weather_factor), min(0.95, congestion_factor)
+
+def estimate_weather_factor(lat, lon):
+    w, c = fetch_conditions_from_api(lat, lon)
+    return w
+
+def estimate_congestion_factor(lat, lon):
+    w, c = fetch_conditions_from_api(lat, lon)
+    return c
+
+# ── Chart colour palette ───────────────────────────────────────────────────────
+TWITTER_BLUE  = "#1d9bf0"
+CORAL         = "#ff6b6b"
+EMERALD       = "#00ba7c"
+AMBER         = "#f5a623"
+VIOLET        = "#7856ff"
+PINK          = "#f91880"
+TEAL          = "#00bcd4"
+MUTED         = "#8899a6"
+BG_WHITE      = "#ffffff"
+BG_LIGHT      = "#f5f8fa"
+BORDER        = "#e1e8ed"
+TEXT          = "#0f1419"
+
+ORBIT_COLORS  = {"LEO": TWITTER_BLUE, "MEO": VIOLET, "GEO": AMBER}
+COMP_COLORS   = {"Propagation": TWITTER_BLUE, "Transmission": CORAL, "Processing": VIOLET, "Queuing": AMBER}
+
+def apply_white_theme(fig, height=320):
+    fig.update_layout(
+        paper_bgcolor=BG_WHITE,
+        plot_bgcolor=BG_WHITE,
+        font=dict(family="'Inter', sans-serif", color=MUTED, size=11),
+        height=height,
+        margin=dict(l=50, r=20, t=30, b=40),
+        xaxis=dict(
+            gridcolor="#f0f3f4", linecolor=BORDER, zeroline=False,
+            tickfont=dict(color=MUTED, size=10),
+            title_font=dict(color=TEXT, size=12),
+        ),
+        yaxis=dict(
+            gridcolor="#f0f3f4", linecolor=BORDER, zeroline=False,
+            tickfont=dict(color=MUTED, size=10),
+            title_font=dict(color=TEXT, size=12),
+        ),
+        legend=dict(
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(color=MUTED, size=10),
+            orientation="h", y=1.12, x=0,
+        ),
+    )
+    return fig
